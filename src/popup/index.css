@@ -1,0 +1,95 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── CSS 变量：深色（默认）/ 浅色 ──────────────────────────────────────────── */
+:root {
+  /* 深色主题（默认） */
+  --bg-deep:    #0F1117;
+  --bg-card:    #161B25;
+  --bg-item:    #1E2535;
+  --border-dim: #2A3347;
+  --text-pri:   #E8EAF0;
+  --text-sec:   #9BA3BA;
+  --shadow:     rgba(0, 0, 0, 0.4);
+  --accent-dim: rgba(255, 107, 74, 0.12);
+
+  /* popup 尺寸固定（CSS 层保证，不依赖 Tailwind） */
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg-deep:    #F5F7FA;
+    --bg-card:    #FFFFFF;
+    --bg-item:    #F1F5F9;
+    --border-dim: #E2E8F0;
+    --text-pri:   #0F172A;
+    --text-sec:   #64748B;
+    --shadow:     rgba(0, 0, 0, 0.10);
+    --accent-dim: rgba(255, 107, 74, 0.08);
+  }
+}
+
+/* ── Reset & 尺寸兜底 ────────────────────────────────────────────────────── */
+@layer base {
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    /* popup 尺寸硬编码，防止 Tailwind class 未生效时塌缩 */
+    width: 400px;
+    min-height: 500px;
+    max-height: 600px;
+    overflow: hidden;
+    background-color: var(--bg-deep);
+    color: var(--text-pri);
+    transition: background-color 0.2s, color 0.2s;
+  }
+
+  #root {
+    width: 400px;
+    min-height: 500px;
+    max-height: 600px;
+    overflow: hidden;
+  }
+
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border-dim); border-radius: 2px; }
+}
+
+/* ── 组件快捷类 ─────────────────────────────────────────────────────────── */
+@layer utilities {
+  .gm-card {
+    @apply rounded-2xl border;
+    background-color: var(--bg-card);
+    border-color: var(--border-dim);
+  }
+
+  .gm-input {
+    @apply rounded-xl px-3 py-2 text-sm outline-none transition-colors w-full;
+    background-color: var(--bg-item);
+    border: 1px solid var(--border-dim);
+    color: var(--text-pri);
+  }
+  .gm-input::placeholder { color: var(--text-sec); }
+  .gm-input:focus { border-color: #FF6B4A; }
+
+  .gm-btn {
+    @apply bg-accent hover:bg-accent-hover text-white text-sm font-semibold
+           rounded-xl px-4 py-2 transition-all active:scale-95 cursor-pointer border-none;
+  }
+
+  .gm-btn-ghost {
+    @apply rounded-xl px-3 py-2 text-sm transition-all cursor-pointer;
+    color: var(--text-sec);
+  }
+  .gm-btn-ghost:hover {
+    color: var(--text-pri);
+    background-color: var(--bg-item);
+  }
+
+  .gm-divider { border-top: 1px solid var(--border-dim); }
+}

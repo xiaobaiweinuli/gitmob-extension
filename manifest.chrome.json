@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "GitMob — GitHub Favorites Sync",
+  "version": "1.0.0",
+  "description": "Sync your GitHub favorites across devices with GitMob App in real time.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://github.com/*",
+    "https://api.github.com/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "src/background/index.ts",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "src/popup/index.html",
+    "default_icon": {
+      "16":  "icon-16.png",
+      "48":  "icon-48.png",
+      "128": "icon-128.png"
+    }
+  },
+  "content_scripts": [{
+    "matches": ["https://github.com/*/*"],
+    "js":      ["src/content/index.tsx"],
+    "css":     [],
+    "run_at":  "document_idle"
+  }],
+  "icons": {
+    "16":  "icon-16.png",
+    "48":  "icon-48.png",
+    "128": "icon-128.png"
+  }
+}
