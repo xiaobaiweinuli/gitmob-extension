@@ -1,18 +1,21 @@
 /**
  * GitMob Extension — Content Script
  * 注入 GitHub 仓库主页，显示悬浮「★」收藏按钮
+ *
+ * 关键设计：按钮容器和弹窗容器分离挂载
+ * - 按钮容器：position:fixed + transform（垂直居中），会捕获子元素的 fixed 定位
+ * - 弹窗容器：独立挂载到 body，position:fixed 不受 transform 影响，弹窗全屏正确
  */
 
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import FloatBtn from './FloatBtn';
 
-// 仅在仓库主页注入（URL 格式：github.com/owner/repo，且 repo 不含 /）
 function parseRepoPage(): { owner: string; repo: string } | null {
   const parts = location.pathname.split('/').filter(Boolean);
   if (parts.length !== 2) return null;
-  // 排除 GitHub 特殊页面
-  const excluded = ['settings', 'marketplace', 'explore', 'notifications', 'login', 'join', 'orgs', 'sponsors'];
+  const excluded = ['settings', 'marketplace', 'explore', 'notifications',
+                    'login', 'join', 'orgs', 'sponsors'];
   if (excluded.includes(parts[0])) return null;
   return { owner: parts[0], repo: parts[1] };
 }
@@ -20,31 +23,52 @@ function parseRepoPage(): { owner: string; repo: string } | null {
 function mount() {
   const repoInfo = parseRepoPage();
   if (!repoInfo) return;
-
-  // 避免重复注入
   if (document.getElementById('gitmob-float-root')) return;
 
-  const container = document.createElement('div');
-  container.id = 'gitmob-float-root';
-  container.style.cssText = 'position:fixed;right:16px;top:50%;transform:translateY(-50%);z-index:9999;';
-  document.body.appendChild(container);
+  // ① 按钮容器：有 transform 做垂直居中，position:fixed 相对 viewport
+  //    注意：不能在此容器内放弹窗，transform 会捕获子 fixed 元素
+  const btnContainer = document.createElement('div');
+  btnContainer.id = 'gitmob-float-root';
+  // 不加 transform，改用 top + translateY 在 FloatBtn 内部控制
+  btnContainer.style.cssText = [
+    'position:fixed',
+    'right:16px',
+    'top:50%',
+    'z-index:9998',
+    'pointer-events:none',   // 容器本身不拦截事件
+  ].join(';');
+  document.body.appendChild(btnContainer);
 
-  createRoot(container).render(
-    <FloatBtn owner={repoInfo.owner} repo={repoInfo.repo} />
+  // ② 弹窗容器：独立挂载到 body，无 transform，fixed 正确全屏
+  const modalContainer = document.createElement('div');
+  modalContainer.id = 'gitmob-modal-root';
+  modalContainer.style.cssText = [
+    'position:fixed',
+    'inset:0',
+    'z-index:99999',
+    'pointer-events:none',   // 无弹窗时完全透明不拦截
+  ].join(';');
+  document.body.appendChild(modalContainer);
+
+  createRoot(btnContainer).render(
+    <FloatBtn
+      owner={repoInfo.owner}
+      repo={repoInfo.repo}
+      modalContainer={modalContainer}
+      btnContainer={btnContainer}
+    />
   );
 }
 
-// 首次加载
 mount();
 
-// GitHub 是 SPA，监听路由变化后重新检测
 let lastPath = location.pathname;
 const observer = new MutationObserver(() => {
   if (location.pathname !== lastPath) {
     lastPath = location.pathname;
-    // 移除旧的挂载点
     document.getElementById('gitmob-float-root')?.remove();
-    setTimeout(mount, 300); // 等 DOM 稳定
+    document.getElementById('gitmob-modal-root')?.remove();
+    setTimeout(mount, 300);
   }
 });
 observer.observe(document.body, { childList: true, subtree: true });

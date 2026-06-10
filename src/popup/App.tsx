@@ -33,25 +33,23 @@ export default function App() {
 
     // 监听 chrome.storage 变化（background 写入后自动触发）
     const handler = (changes: { [key: string]: chrome.storage.StorageChange }) => {
-      // 数据更新
-      if (changes.groups || changes.repos || changes.versionVector) {
-        chrome.storage.local.get(['groups', 'repos', 'versionVector', 'lastSyncAt'], s => {
-          useStore.setState({
-            groups:        s.groups        ?? [],
-            repos:         s.repos         ?? [],
-            versionVector: s.versionVector ?? {},
-            lastSyncAt:    s.lastSyncAt    ?? null,
-          });
-        });
+      // 数据更新：直接用 newValue，避免再次 sendMessage 延迟
+      if (changes.groups || changes.repos || changes.versionVector || changes.lastSyncAt) {
+        const update: Record<string, unknown> = {};
+        if (changes.groups)        update.groups        = changes.groups.newValue        ?? [];
+        if (changes.repos)         update.repos         = changes.repos.newValue         ?? [];
+        if (changes.versionVector) update.versionVector = changes.versionVector.newValue ?? {};
+        if (changes.lastSyncAt)    update.lastSyncAt    = changes.lastSyncAt.newValue    ?? null;
+        useStore.setState(update as any);
       }
-      // 同步状态变化
+      // 同步状态
       if (changes.syncStatus || changes.syncError) {
         useStore.setState({
           syncStatus: (changes.syncStatus?.newValue ?? useStore.getState().syncStatus) as any,
           syncError:   changes.syncError?.newValue  ?? null,
         });
       }
-      // 冲突检测
+      // 冲突
       if (changes.pendingConflicts?.newValue) {
         useStore.setState({
           conflicts: changes.pendingConflicts.newValue,

@@ -50,11 +50,23 @@ export default function MainPage() {
     useStore.setState(s => ({ repos: s.repos.filter(r => r.full_name !== fullName) }));
   }
 
+  const [newGroupNameError, setNewGroupNameError] = useState('');
+
   function handleAddGroup() {
-    if (!newGroupName.trim()) return;
+    const trimmed = newGroupName.trim();
+    if (!trimmed) return;
+    // 检查重名（不区分大小写）
+    const duplicate = groups.some(
+      g => g.name.trim().toLowerCase() === trimmed.toLowerCase()
+    );
+    if (duplicate) {
+      setNewGroupNameError(`分组「${trimmed}」已存在`);
+      return;
+    }
+    setNewGroupNameError('');
     const g = {
       id:          crypto.randomUUID(),
-      name:        newGroupName.trim(),
+      name:        trimmed,
       description: newGroupDesc.trim(),
       sort_order:  groups.length,
     };
@@ -137,6 +149,7 @@ export default function MainPage() {
                   <GroupItem
                     key={group.id}
                     group={group}
+                    allGroups={groups}
                     repos={repos}
                     editMode={true}
                     onSave={handleGroupSave}
@@ -182,7 +195,7 @@ export default function MainPage() {
       {showAddGroup && (
         <div
           className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 animate-fade-in"
-          onClick={() => setShowAddGroup(false)}
+          onClick={() => { setShowAddGroup(false); setNewGroupNameError(''); }}
         >
           <div className="gm-card p-5 w-72 shadow-gm animate-fade-up" onClick={e => e.stopPropagation()}>
             <h3 className="text-base font-semibold text-text-pri mb-4">新建分组</h3>
@@ -191,12 +204,17 @@ export default function MainPage() {
                 <label className="text-xs font-semibold text-text-sec uppercase tracking-wide mb-1.5 block">分组名称</label>
                 <input
                   autoFocus
-                  className="gm-input"
+                  className={`gm-input ${newGroupNameError ? 'border-error' : ''}`}
                   placeholder="例如：工具库"
                   value={newGroupName}
-                  onChange={e => setNewGroupName(e.target.value)}
+                  onChange={e => { setNewGroupName(e.target.value); setNewGroupNameError(''); }}
                   onKeyDown={e => e.key === 'Enter' && handleAddGroup()}
                 />
+                {newGroupNameError && (
+                  <p className="text-xs mt-1" style={{ color: 'var(--tw-color-error, #F85149)' }}>
+                    {newGroupNameError}
+                  </p>
+                )}
               </div>
               <div>
                 <label className="text-xs font-semibold text-text-sec uppercase tracking-wide mb-1.5 block">描述（可选）</label>
@@ -209,8 +227,15 @@ export default function MainPage() {
                 />
               </div>
               <div className="flex gap-2 pt-1">
-                <button onClick={() => setShowAddGroup(false)} className="gm-btn-ghost flex-1">取消</button>
-                <button onClick={handleAddGroup} className="gm-btn flex-1" disabled={!newGroupName.trim()}>创建</button>
+                <button
+                  onClick={() => { setShowAddGroup(false); setNewGroupNameError(''); }}
+                  className="gm-btn-ghost flex-1"
+                >取消</button>
+                <button
+                  onClick={handleAddGroup}
+                  className="gm-btn flex-1"
+                  disabled={!newGroupName.trim()}
+                >创建</button>
               </div>
             </div>
           </div>

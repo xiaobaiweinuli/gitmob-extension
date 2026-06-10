@@ -6,28 +6,29 @@ import { getGroupRepos }     from '../../shared/store';
 import RepoCard from './RepoCard';
 
 interface Props {
-  group:       FavGroup;
-  repos:       FavRepo[];
-  editMode:    boolean;
-  onSave:      (id: string, name: string, desc: string) => void;
-  onDelete:    (id: string) => void;
-  onRemoveRepo:(fullName: string) => void;
-  onAddRepo?:  () => void;
+  group:        FavGroup;
+  allGroups:    FavGroup[];   // 用于重复名称检查
+  repos:        FavRepo[];
+  editMode:     boolean;
+  onSave:       (id: string, name: string, desc: string) => void;
+  onDelete:     (id: string) => void;
+  onRemoveRepo: (fullName: string) => void;
+  onAddRepo?:   () => void;
 }
 
 export default function GroupItem({
-  group, repos, editMode, onSave, onDelete, onRemoveRepo,
+  group, allGroups, repos, editMode, onSave, onDelete, onRemoveRepo,
 }: Props) {
-  const [open,    setOpen]    = useState(true);
-  const [editing, setEditing] = useState(false);
-  const [name,    setName]    = useState(group.name);
-  const [desc,    setDesc]    = useState(group.description);
-  const [showDel, setShowDel] = useState(false);
+  const [open,      setOpen]      = useState(true);
+  const [editing,   setEditing]   = useState(false);
+  const [name,      setName]      = useState(group.name);
+  const [desc,      setDesc]      = useState(group.description);
+  const [showDel,   setShowDel]   = useState(false);
+  const [nameError, setNameError] = useState('');
 
-  const nameRef = useRef<HTMLInputElement>(null);
+  const nameRef    = useRef<HTMLInputElement>(null);
   const groupRepos = getGroupRepos(repos, group.id);
 
-  // dnd-kit sortable
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: group.id });
 
@@ -43,11 +44,27 @@ export default function GroupItem({
   }, [editing]);
 
   function handleSave() {
-    if (name.trim()) { onSave(group.id, name.trim(), desc.trim()); setEditing(false); }
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    // 重复名称检查（排除自身，不区分大小写）
+    const duplicate = allGroups.some(
+      g => g.id !== group.id && g.name.trim().toLowerCase() === trimmed.toLowerCase()
+    );
+    if (duplicate) {
+      setNameError(`分组「${trimmed}」已存在`);
+      return;
+    }
+    setNameError('');
+    onSave(group.id, trimmed, desc.trim());
+    setEditing(false);
   }
+
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === 'Enter')  { handleSave(); }
-    if (e.key === 'Escape') { setName(group.name); setDesc(group.description); setEditing(false); }
+    if (e.key === 'Escape') {
+      setName(group.name); setDesc(group.description);
+      setEditing(false); setNameError('');
+    }
   }
 
   return (
@@ -88,12 +105,15 @@ export default function GroupItem({
           <div className="flex-1 space-y-1">
             <input
               ref={nameRef}
-              className="gm-input py-1 text-sm"
+              className={`gm-input py-1 text-sm ${nameError ? 'border-error' : ''}`}
               value={name}
-              onChange={e => setName(e.target.value)}
+              onChange={e => { setName(e.target.value); setNameError(''); }}
               onKeyDown={handleKeyDown}
               placeholder="分组名称"
             />
+            {nameError && (
+              <p className="text-[11px] px-1" style={{ color: '#F85149' }}>{nameError}</p>
+            )}
             <input
               className="gm-input py-1 text-xs"
               value={desc}

@@ -44,7 +44,7 @@ async function init() {
 }
 init();
 
-// ─── 工具：保存数据到 storage ─────────────────────────────────────────────────
+// ─── 工具：保存数据到 storage，并通知所有 GitHub tab 刷新 ──────────────────
 async function saveData(g: FavGroup[], r: FavRepo[], v: VersionVector) {
   groups = g; repos = r; vector = v;
   await chrome.storage.local.set({
@@ -52,6 +52,20 @@ async function saveData(g: FavGroup[], r: FavRepo[], v: VersionVector) {
     repos:  r,
     versionVector: v,
     lastSyncAt: Date.now(),
+  });
+  // 通知所有打开的 GitHub tab 上的 content script 刷新收藏状态
+  notifyContentScripts();
+}
+
+// 向所有 GitHub tab 的 content script 发送刷新消息
+function notifyContentScripts() {
+  chrome.tabs.query({ url: 'https://github.com/*/*' }, (tabs) => {
+    for (const tab of tabs) {
+      if (tab.id) {
+        chrome.tabs.sendMessage(tab.id, { type: 'gitmob_state_updated' })
+          .catch(() => { /* tab 可能没有注入 content script，忽略 */ });
+      }
+    }
   });
 }
 

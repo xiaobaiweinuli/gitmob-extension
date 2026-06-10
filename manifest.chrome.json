@@ -3,7 +3,7 @@
   "name": "GitMob — GitHub Favorites Sync",
   "version": "1.0.0",
   "description": "Sync your GitHub favorites across devices with GitMob App in real time.",
-  "permissions": ["storage"],
+  "permissions": ["storage", "tabs"],
   "host_permissions": [
     "https://github.com/*",
     "https://api.github.com/*",
