@@ -31,12 +31,13 @@ export default function RepoCard({ repo, onRemove, dragHandle }: Props) {
         </div>
       )}
 
-      {/* 主内容区（点击跳转 GitHub）*/}
-      <a
-        href={repo.html_url}
-        target="_blank"
-        rel="noreferrer"
-        className="flex-1 p-3 block min-w-0"
+      {/* 主内容区（点击跳转 GitHub，Popup 里 a target=_blank 不生效，用 chrome.tabs.create）*/}
+      <div
+        className="flex-1 p-3 block min-w-0 cursor-pointer"
+        onClick={() => chrome.tabs.create({ url: repo.html_url })}
+        role="link"
+        tabIndex={0}
+        onKeyDown={e => e.key === 'Enter' && chrome.tabs.create({ url: repo.html_url })}
       >
         {/* 仓库名 */}
         <div className="flex items-center gap-1.5 mb-1">
@@ -75,7 +76,7 @@ export default function RepoCard({ repo, onRemove, dragHandle }: Props) {
             {repo.default_branch}
           </span>
         </div>
-      </a>
+      </div>
 
       {/* 移除按钮（悬停显示）*/}
       {onRemove && (
