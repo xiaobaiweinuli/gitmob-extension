@@ -10,10 +10,11 @@ interface Props {
 }
 
 type FavState = 'loading' | 'not_authed' | 'favorited' | 'not_favorited';
+type Side = 'left' | 'right';
 
 // ─── 主题 ──────────────────────────────────────────────────────────────────
-const DARK  = { bgCard:'#161B25', bgItem:'#1E2535', border:'#2A3347', textPri:'#E8EAF0', textSec:'#9BA3BA', shadow:'0 16px 40px rgba(0,0,0,.5)', btnShadow:'0 4px 12px rgba(0,0,0,.4)', overlay:'rgba(0,0,0,.65)' };
-const LIGHT = { bgCard:'#FFFFFF', bgItem:'#F1F5F9', border:'#E2E8F0', textPri:'#0F172A',  textSec:'#64748B',  shadow:'0 16px 40px rgba(0,0,0,.15)', btnShadow:'0 4px 12px rgba(0,0,0,.12)', overlay:'rgba(0,0,0,.45)' };
+const DARK  = { bgCard:'#161B25', bgItem:'#1E2535', border:'#2A3347', textPri:'#E8EAF0', textSec:'#9BA3BA', shadow:'0 12px 32px rgba(0,0,0,.45)', btnShadow:'0 4px 12px rgba(0,0,0,.4)' };
+const LIGHT = { bgCard:'#FFFFFF', bgItem:'#F1F5F9', border:'#E2E8F0', textPri:'#0F172A',  textSec:'#64748B',  shadow:'0 12px 32px rgba(0,0,0,.18)', btnShadow:'0 4px 12px rgba(0,0,0,.12)' };
 type Theme = typeof DARK;
 
 function useTheme(): Theme {
@@ -27,20 +28,9 @@ function useTheme(): Theme {
   return dark ? DARK : LIGHT;
 }
 
-// ─── 按钮位置（全屏可拖，松手贴边）────────────────────────────────────────
-interface BtnPos { x: number; y: number; }  // 按钮左上角相对 viewport
-
-function snapToEdge(pos: BtnPos, btnW: number, btnH: number): BtnPos {
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
-  const margin = 12;
-  // 松手时吸附到最近的水平边
-  const snapLeft  = pos.x + btnW / 2 < vw / 2;
-  const x = snapLeft ? margin : vw - btnW - margin;
-  // 垂直方向限制在屏幕内
-  const y = Math.max(margin, Math.min(vh - btnH - margin, pos.y));
-  return { x, y };
-}
+const BTN_SIZE = 44;
+const MARGIN   = 12;
+const MODAL_W  = 300;
 
 export default function FloatBtn({ owner, repo, btnContainer, modalContainer }: Props) {
   const fullName = `${owner}/${repo}`;
@@ -56,37 +46,47 @@ export default function FloatBtn({ owner, repo, btnContainer, modalContainer }: 
   const [newGroupDesc,  setNewGroupDesc]  = useState('');
   const [nameError,     setNameError]     = useState('');
   const [repoMeta,      setRepoMeta]      = useState<Partial<FavRepo>>({});
+  const [modalPos,      setModalPos]      = useState<{ top: number; left: number } | null>(null);
 
-  // ─── 拖拽状态 ───────────────────────────────────────────────────────────
-  const BTN_SIZE = 44; // px
-  const isDragging  = useRef(false);
-  const dragMoved   = useRef(false);
+  // ─── 按钮位置：side（贴边） + yPercent（垂直相对位置）──────────────────
+  // 用相对值而非绝对像素存储，窗口缩放时重新换算像素坐标，按钮始终在可视区内
+  const sideRef     = useRef<Side>('right');
+  const yPercentRef = useRef(0.5); // 0~1，相对 (视口高度 - 按钮高度) 的比例
+
+  const isDragging   = useRef(false);
+  const dragMoved    = useRef(false);
   const pointerStart = useRef({ x: 0, y: 0 });
-  // 按钮当前位置（左上角 viewport 坐标）
-  const posRef = useRef<BtnPos>({ x: window.innerWidth - BTN_SIZE - 16, y: window.innerHeight / 2 - BTN_SIZE / 2 });
+  const dragXRef      = useRef(0); // 拖拽中的临时像素位置
+  const dragYRef      = useRef(0);
 
-  // 初始化容器位置（去掉 index.tsx 里的 transform，改为绝对坐标）
-  useEffect(() => {
-    const p = posRef.current;
-    Object.assign(btnContainer.style, {
-      right:     '',
-      top:       `${p.y}px`,
-      left:      `${p.x}px`,
-      transform: '',
-    });
+  // 根据 side + yPercent 计算实际像素坐标并应用到 DOM
+  const applyFromRelative = useCallback(() => {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const x  = sideRef.current === 'left' ? MARGIN : vw - BTN_SIZE - MARGIN;
+    const y  = Math.max(MARGIN, Math.min(vh - BTN_SIZE - MARGIN, yPercentRef.current * (vh - BTN_SIZE)));
+    btnContainer.style.left = `${x}px`;
+    btnContainer.style.top  = `${y}px`;
+    btnContainer.style.right = '';
+    btnContainer.style.transform = '';
+    dragXRef.current = x;
+    dragYRef.current = y;
   }, [btnContainer]);
 
-  function applyPos(p: BtnPos) {
-    posRef.current = p;
-    btnContainer.style.left = `${p.x}px`;
-    btnContainer.style.top  = `${p.y}px`;
-  }
+  // 初始定位 + 监听窗口缩放重新换算（核心修复：按钮不再因缩放消失）
+  useEffect(() => {
+    applyFromRelative();
+    const onResize = () => applyFromRelative();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [applyFromRelative]);
 
+  // ─── 拖拽 ─────────────────────────────────────────────────────────────
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     if (showModal) return;
     e.preventDefault();
-    isDragging.current  = true;
-    dragMoved.current   = false;
+    isDragging.current   = true;
+    dragMoved.current    = false;
     pointerStart.current = { x: e.clientX, y: e.clientY };
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   }, [showModal]);
@@ -96,27 +96,33 @@ export default function FloatBtn({ owner, repo, btnContainer, modalContainer }: 
     const dx = e.clientX - pointerStart.current.x;
     const dy = e.clientY - pointerStart.current.y;
     if (Math.abs(dx) > 3 || Math.abs(dy) > 3) dragMoved.current = true;
-    const p = posRef.current;
+
     const vw = window.innerWidth, vh = window.innerHeight;
-    applyPos({
-      x: Math.max(0, Math.min(vw - BTN_SIZE, p.x + dx)),
-      y: Math.max(0, Math.min(vh - BTN_SIZE, p.y + dy)),
-    });
+    const nx = Math.max(0, Math.min(vw - BTN_SIZE, dragXRef.current + dx));
+    const ny = Math.max(0, Math.min(vh - BTN_SIZE, dragYRef.current + dy));
+    dragXRef.current = nx;
+    dragYRef.current = ny;
+    btnContainer.style.left = `${nx}px`;
+    btnContainer.style.top  = `${ny}px`;
     pointerStart.current = { x: e.clientX, y: e.clientY };
-  }, []);
+  }, [btnContainer]);
 
   const onPointerUp = useCallback((e: React.PointerEvent) => {
     if (!isDragging.current) return;
     isDragging.current = false;
     (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+
     if (dragMoved.current) {
-      // 松手：吸附到最近侧边
-      applyPos(snapToEdge(posRef.current, BTN_SIZE, BTN_SIZE));
+      // 松手：吸附最近侧边，并把当前位置换算为相对值持久化（缩放安全）
+      const vw = window.innerWidth, vh = window.innerHeight;
+      const side: Side = (dragXRef.current + BTN_SIZE / 2) < vw / 2 ? 'left' : 'right';
+      sideRef.current     = side;
+      yPercentRef.current = Math.max(0, Math.min(1, dragYRef.current / (vh - BTN_SIZE)));
+      applyFromRelative();
     } else {
-      // 没移动：视为点击，打开弹窗
       openModal();
     }
-  }, []);
+  }, [applyFromRelative]);
 
   // ─── 数据加载 ─────────────────────────────────────────────────────────
   const loadState = useCallback(() => {
@@ -162,21 +168,53 @@ export default function FloatBtn({ owner, repo, btnContainer, modalContainer }: 
     } catch { return {}; }
   }
 
+  // ─── 弹窗定位：锚定按钮，自动判断上下左右 ────────────────────────────
+  // 不再用全屏居中弹窗；改为紧贴按钮弹出，根据按钮所在象限智能翻转
+  const computeModalPos = useCallback((estHeight: number) => {
+    const btnRect = btnContainer.getBoundingClientRect();
+    const vw = window.innerWidth, vh = window.innerHeight;
+
+    // 水平方向：按钮贴右边就往左弹，贴左边就往右弹
+    const placeLeft = sideRef.current === 'right';
+    let left = placeLeft
+      ? btnRect.left - MODAL_W - 10
+      : btnRect.right + 10;
+    // 极端窄屏兜底：弹窗超出视口则贴边显示
+    left = Math.max(MARGIN, Math.min(vw - MODAL_W - MARGIN, left));
+
+    // 垂直方向：尽量与按钮顶部对齐，超出底部则向上翻转对齐按钮底部
+    let top = btnRect.top;
+    if (top + estHeight > vh - MARGIN) {
+      top = btnRect.bottom - estHeight;
+    }
+    top = Math.max(MARGIN, Math.min(vh - estHeight - MARGIN, top));
+
+    return { top, left };
+  }, [btnContainer]);
+
   // ─── 弹窗开关 ──────────────────────────────────────────────────────────
-  const openModalRef = useRef<() => void>(() => {});
   async function openModal() {
     loadState();
     setRepoMeta(await fetchMeta());
+    // 估算弹窗高度（基础内容 ~230px + 分组列表区域），用于初次定位
+    setModalPos(computeModalPos(360));
     setShowModal(true);
     modalContainer.style.pointerEvents = 'auto';
   }
-  useEffect(() => { openModalRef.current = openModal; });
 
   function closeModal() {
     setShowModal(false); setShowNewGroup(false);
     setNewGroupName(''); setNewGroupDesc(''); setNameError('');
     modalContainer.style.pointerEvents = 'none';
   }
+
+  // 弹窗打开期间窗口缩放：重新计算锚定位置，保持跟随按钮
+  useEffect(() => {
+    if (!showModal) return;
+    const onResize = () => setModalPos(computeModalPos(360));
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [showModal, computeModalPos]);
 
   // ─── 收藏操作 ──────────────────────────────────────────────────────────
   async function handleConfirm() {
@@ -218,19 +256,36 @@ export default function FloatBtn({ owner, repo, btnContainer, modalContainer }: 
   if (favState === 'not_authed' || favState === 'loading') return null;
   const isFav = favState === 'favorited';
 
-  // ─── 弹窗 DOM（portal 到独立容器）────────────────────────────────────
-  const modal = showModal ? (
-    <div style={{ position:'fixed', inset:0, background:t.overlay, display:'flex', alignItems:'center', justifyContent:'center', zIndex:99999, fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif' }} onClick={closeModal}>
-      <div style={{ background:t.bgCard, border:`1px solid ${t.border}`, borderRadius:20, padding:20, width:300, maxWidth:'calc(100vw - 32px)', boxShadow:t.shadow, color:t.textPri }} onClick={e => e.stopPropagation()}>
+  // ─── 弹窗 DOM：锚定在按钮旁，带快速淡入缩放动画 ──────────────────────
+  const modal = showModal && modalPos ? (
+    <>
+      {/* 透明全屏背景，仅用于捕获点击外部关闭，不做视觉遮罩，弹窗不再"远在天边" */}
+      <div style={{ position:'fixed', inset:0, zIndex:99999 }} onClick={closeModal} />
+      <div
+        style={{
+          position: 'fixed',
+          top: modalPos.top, left: modalPos.left,
+          background:t.bgCard, border:`1px solid ${t.border}`,
+          borderRadius:16, padding:18,
+          width: MODAL_W, maxWidth:'calc(100vw - 24px)',
+          boxShadow:t.shadow, color:t.textPri,
+          zIndex: 100000,
+          fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif',
+          animation: 'gitmob-pop-in .12s ease-out',
+        }}
+        onClick={e => e.stopPropagation()}
+      >
+        <style>{`@keyframes gitmob-pop-in { from { opacity:0; transform:scale(.96); } to { opacity:1; transform:scale(1); } }`}</style>
+
         {/* 仓库名 */}
-        <div style={{ marginBottom:16 }}>
-          <div style={{ fontSize:14, fontWeight:700, color:'#FF6B4A', fontFamily:'monospace', wordBreak:'break-all', marginBottom:2 }}>{fullName}</div>
-          {repoMeta.description && <div style={{ fontSize:12, color:t.textSec, lineHeight:1.5 }}>{repoMeta.description}</div>}
+        <div style={{ marginBottom:14 }}>
+          <div style={{ fontSize:13, fontWeight:700, color:'#FF6B4A', fontFamily:'monospace', wordBreak:'break-all', marginBottom:2 }}>{fullName}</div>
+          {repoMeta.description && <div style={{ fontSize:11, color:t.textSec, lineHeight:1.5 }}>{repoMeta.description}</div>}
         </div>
 
         {/* 分组选择 */}
-        <div style={{ fontSize:11, fontWeight:700, color:t.textSec, textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:8 }}>选择分组</div>
-        <div style={{ maxHeight:160, overflowY:'auto', marginBottom:10, display:'flex', flexDirection:'column', gap:6 }}>
+        <div style={{ fontSize:10, fontWeight:700, color:t.textSec, textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:7 }}>选择分组</div>
+        <div style={{ maxHeight:150, overflowY:'auto', marginBottom:9, display:'flex', flexDirection:'column', gap:5 }}>
           <GroupOption label="未分组" desc={null} selected={selectedGroup===null} onSelect={() => setSelectedGroup(null)} t={t} />
           {groups.sort((a,b) => a.sort_order-b.sort_order).map(g => (
             <GroupOption key={g.id} label={g.name} desc={g.description||null} selected={selectedGroup===g.id} onSelect={() => setSelectedGroup(g.id)} t={t} />
@@ -239,44 +294,43 @@ export default function FloatBtn({ owner, repo, btnContainer, modalContainer }: 
 
         {/* 新建分组 */}
         {showNewGroup ? (
-          <div style={{ marginBottom:12, display:'flex', flexDirection:'column', gap:6 }}>
-            <input autoFocus style={{ background:t.bgItem, border:`1px solid ${nameError?'#F85149':t.border}`, borderRadius:10, padding:'7px 10px', color:t.textPri, fontSize:13, outline:'none', width:'100%', boxSizing:'border-box' }}
+          <div style={{ marginBottom:11, display:'flex', flexDirection:'column', gap:5 }}>
+            <input autoFocus style={{ background:t.bgItem, border:`1px solid ${nameError?'#F85149':t.border}`, borderRadius:9, padding:'6px 9px', color:t.textPri, fontSize:12, outline:'none', width:'100%', boxSizing:'border-box' }}
               placeholder="分组名称" value={newGroupName}
               onChange={e => { setNewGroupName(e.target.value); setNameError(''); }}
               onKeyDown={e => { if(e.key==='Enter') handleAddGroup(); if(e.key==='Escape'){setShowNewGroup(false);setNewGroupName('');setNewGroupDesc('');setNameError('');} }} />
-            {nameError && <div style={{ fontSize:11, color:'#F85149' }}>{nameError}</div>}
-            <div style={{ display:'flex', gap:6 }}>
-              <input style={{ flex:1, background:t.bgItem, border:`1px solid ${t.border}`, borderRadius:10, padding:'7px 10px', color:t.textPri, fontSize:12, outline:'none' }}
+            {nameError && <div style={{ fontSize:10, color:'#F85149' }}>{nameError}</div>}
+            <div style={{ display:'flex', gap:5 }}>
+              <input style={{ flex:1, background:t.bgItem, border:`1px solid ${t.border}`, borderRadius:9, padding:'6px 9px', color:t.textPri, fontSize:11, outline:'none' }}
                 placeholder="描述（可选）" value={newGroupDesc} onChange={e => setNewGroupDesc(e.target.value)}
                 onKeyDown={e => { if(e.key==='Enter') handleAddGroup(); if(e.key==='Escape'){setShowNewGroup(false);setNewGroupName('');setNewGroupDesc('');setNameError('');} }} />
-              <button style={{ background:'#FF6B4A', border:'none', borderRadius:10, color:'#fff', padding:'7px 12px', cursor:'pointer', fontWeight:600, whiteSpace:'nowrap' }} onClick={handleAddGroup}>添加</button>
+              <button style={{ background:'#FF6B4A', border:'none', borderRadius:9, color:'#fff', padding:'6px 11px', cursor:'pointer', fontWeight:600, whiteSpace:'nowrap', fontSize:11 }} onClick={handleAddGroup}>添加</button>
             </div>
-            <button style={{ background:'none', border:'none', color:t.textSec, cursor:'pointer', fontSize:12, padding:'2px 0', textAlign:'left' }} onClick={() => { setShowNewGroup(false); setNewGroupName(''); setNewGroupDesc(''); setNameError(''); }}>取消</button>
+            <button style={{ background:'none', border:'none', color:t.textSec, cursor:'pointer', fontSize:11, padding:'2px 0', textAlign:'left' }} onClick={() => { setShowNewGroup(false); setNewGroupName(''); setNewGroupDesc(''); setNameError(''); }}>取消</button>
           </div>
         ) : (
-          <button style={{ display:'flex', alignItems:'center', gap:5, background:'none', border:'none', color:'#FF6B4A', cursor:'pointer', fontSize:12, padding:'4px 0', marginBottom:12 }} onClick={() => setShowNewGroup(true)}>
-            <span style={{ fontSize:15 }}>＋</span> 新建分组
+          <button style={{ display:'flex', alignItems:'center', gap:4, background:'none', border:'none', color:'#FF6B4A', cursor:'pointer', fontSize:11, padding:'3px 0', marginBottom:11 }} onClick={() => setShowNewGroup(true)}>
+            <span style={{ fontSize:14 }}>＋</span> 新建分组
           </button>
         )}
 
         {/* 操作按钮 */}
-        <div style={{ display:'flex', gap:8 }}>
-          <button style={{ flex:1, background:'none', border:`1px solid ${t.border}`, borderRadius:12, color:t.textSec, cursor:'pointer', padding:9, fontSize:13 }} onClick={closeModal}>取消</button>
+        <div style={{ display:'flex', gap:7 }}>
+          <button style={{ flex:1, background:'none', border:`1px solid ${t.border}`, borderRadius:10, color:t.textSec, cursor:'pointer', padding:8, fontSize:12 }} onClick={closeModal}>取消</button>
           {isFav && (
-            <button style={{ flex:1, background:'rgba(248,81,73,.1)', border:'1px solid rgba(248,81,73,.3)', borderRadius:12, color:'#F85149', cursor:'pointer', padding:9, fontSize:13 }} onClick={handleRemove}>移出收藏</button>
+            <button style={{ flex:1, background:'rgba(248,81,73,.1)', border:'1px solid rgba(248,81,73,.3)', borderRadius:10, color:'#F85149', cursor:'pointer', padding:8, fontSize:12 }} onClick={handleRemove}>移出收藏</button>
           )}
-          <button style={{ flex:1, background:'#FF6B4A', border:'none', borderRadius:12, color:'#fff', cursor:adding?'not-allowed':'pointer', padding:9, fontSize:13, fontWeight:600, opacity:adding?0.7:1 }} onClick={handleConfirm} disabled={adding}>
+          <button style={{ flex:1, background:'#FF6B4A', border:'none', borderRadius:10, color:'#fff', cursor:adding?'not-allowed':'pointer', padding:8, fontSize:12, fontWeight:600, opacity:adding?0.7:1 }} onClick={handleConfirm} disabled={adding}>
             {adding ? '…' : (isFav ? '确认修改' : '确认收藏')}
           </button>
         </div>
       </div>
-    </div>
+    </>
   ) : null;
 
   return (
     <>
-      {/* 悬浮按钮：pointer-events 激活，touchAction:none 防止触摸滚动干扰拖拽 */}
-      <div style={{ pointerEvents:'auto', transform:'none', display:'inline-block' }}>
+      <div style={{ pointerEvents:'auto', display:'inline-block' }}>
         <button
           style={{ width:BTN_SIZE, height:BTN_SIZE, borderRadius:12, border:`1px solid ${isFav?'#FF6B4A40':t.border}`, background:isFav?'rgba(255,107,74,.12)':t.bgCard, color:isFav?'#FF6B4A':t.textSec, cursor:isDragging.current?'grabbing':'grab', outline:'none', touchAction:'none', userSelect:'none', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:1, boxShadow:t.btnShadow, transition:'border-color .2s,background .2s' }}
           onPointerDown={onPointerDown}
@@ -296,13 +350,13 @@ export default function FloatBtn({ owner, repo, btnContainer, modalContainer }: 
 
 function GroupOption({ label, desc, selected, onSelect, t }: { label:string; desc:string|null; selected:boolean; onSelect:()=>void; t:Theme }) {
   return (
-    <div onClick={onSelect} style={{ display:'flex', alignItems:'flex-start', gap:10, padding:'9px 12px', borderRadius:12, cursor:'pointer', border:`1px solid ${selected?'rgba(255,107,74,.5)':t.border}`, background:selected?'rgba(255,107,74,.08)':'transparent', transition:'all .15s' }}>
-      <div style={{ width:16, height:16, borderRadius:'50%', flexShrink:0, marginTop:1, border:`2px solid ${selected?'#FF6B4A':t.border}`, display:'flex', alignItems:'center', justifyContent:'center' }}>
-        {selected && <div style={{ width:7, height:7, borderRadius:'50%', background:'#FF6B4A' }} />}
+    <div onClick={onSelect} style={{ display:'flex', alignItems:'flex-start', gap:9, padding:'8px 11px', borderRadius:10, cursor:'pointer', border:`1px solid ${selected?'rgba(255,107,74,.5)':t.border}`, background:selected?'rgba(255,107,74,.08)':'transparent', transition:'all .15s' }}>
+      <div style={{ width:15, height:15, borderRadius:'50%', flexShrink:0, marginTop:1, border:`2px solid ${selected?'#FF6B4A':t.border}`, display:'flex', alignItems:'center', justifyContent:'center' }}>
+        {selected && <div style={{ width:6, height:6, borderRadius:'50%', background:'#FF6B4A' }} />}
       </div>
       <div style={{ flex:1, minWidth:0 }}>
-        <div style={{ fontSize:13, fontWeight:600, color:t.textPri, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{label}</div>
-        {desc && <div style={{ fontSize:11, color:t.textSec, marginTop:1, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{desc}</div>}
+        <div style={{ fontSize:12, fontWeight:600, color:t.textPri, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{label}</div>
+        {desc && <div style={{ fontSize:10, color:t.textSec, marginTop:1, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{desc}</div>}
       </div>
     </div>
   );

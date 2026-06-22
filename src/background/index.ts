@@ -68,13 +68,12 @@ async function init(): Promise<void> {
   chrome.alarms.create(ALARM_NAME, { periodInMinutes: 30 / 60 });
 
   // 有 token 则尝试建立 WS
-  if (token) connectWs();
+  if (token) connectWs().catch(console.error);
 }
 
 // ─── WebSocket 连接 ───────────────────────────────────────────────────────────
 
-function connectWs(): void {
-  // 防止：token 不存在、已连接、正在连接
+async function connectWs(): Promise<void> {
   if (!token || isConnecting) return;
   if (ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) return;
 
@@ -82,48 +81,62 @@ function connectWs(): void {
   clearReconnectTimer();
 
   try {
+    // 第一步：用 REST + Authorization header 获取一次性 ws_token
+    // 避免 GitHub PAT 出现在 WS URL（URL 可能被日志记录、浏览器历史等）
+    const authRes = await fetch(`${syncUrl.replace(/\/$/, '')}/ws-auth`, {
+      method:  'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-Device-Id': deviceId,
+      },
+    });
+
+    if (!authRes.ok) {
+      isConnecting = false;
+      if (token) scheduleReconnect();
+      return;
+    }
+
+    const authData = await authRes.json() as { ok: boolean; ws_token?: string };
+    if (!authData.ok || !authData.ws_token) {
+      isConnecting = false;
+      if (token) scheduleReconnect();
+      return;
+    }
+
+    // 第二步：用一次性 ws_token 建立 WS 连接（URL 中不含明文 PAT）
     const base  = syncUrl.replace(/^http/, 'ws').replace(/\/$/, '');
-    // 浏览器端 WS 不支持自定义 header，token 通过 URL 参数传入
-    const wsUrl = `${base}/ws?device_id=${encodeURIComponent(deviceId)}&token=${encodeURIComponent(token!)}`;
+    const wsUrl = `${base}/ws?device_id=${encodeURIComponent(deviceId)}&ws_token=${encodeURIComponent(authData.ws_token)}`;
 
     ws = new WebSocket(wsUrl);
 
     ws.onopen = (): void => {
-      isConnecting    = false;
-      reconnectDelay  = RECONNECT_INIT_MS; // 连接成功，重置退避延迟
-
-      // 启动主保活：每 20s 发 ping，重置 SW idle timer
+      isConnecting   = false;
+      reconnectDelay = RECONNECT_INIT_MS;
       startKeepalive();
-
-      // 连接后立即做一次版本检查，获取离线期间的变更
       syncCheck().catch(console.error);
     };
 
     ws.onmessage = (e: MessageEvent): void => {
       try {
         const msg = JSON.parse(e.data as string) as { type: string };
-        if (msg.type === 'pong') return; // 心跳响应，忽略
+        if (msg.type === 'pong') return;
         if (msg.type === 'fav_updated' || msg.type === 'need_full_sync') {
-          // 收到其他设备的变更广播 → 触发版本检查
           syncCheck().catch(console.error);
         }
-      } catch { /* 忽略非法消息，不中断连接 */ }
+      } catch { /* 忽略非法消息 */ }
     };
 
     ws.onclose = (): void => {
       isConnecting = false;
       ws           = null;
       stopKeepalive();
-      // 有 token 时安排指数退避重连
       if (token) scheduleReconnect();
     };
 
-    ws.onerror = (): void => {
-      // onerror 之后必然触发 onclose，在 onclose 里处理重连
-      ws?.close();
-    };
+    ws.onerror = (): void => { ws?.close(); };
 
-  } catch (err) {
+  } catch {
     isConnecting = false;
     if (token) scheduleReconnect();
   }
@@ -158,7 +171,7 @@ function scheduleReconnect(): void {
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
-    connectWs();
+    connectWs().catch(console.error);
   }, reconnectDelay);
 }
 
@@ -183,7 +196,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   } else if (!isConnecting) {
     // WS 不在线且没有正在连接：触发重连（SW 被杀后的恢复路径）
     reconnectDelay = RECONNECT_INIT_MS; // alarm 唤醒时重置退避，快速恢复
-    connectWs();
+    connectWs().catch(console.error);
   }
 });
 
@@ -391,7 +404,7 @@ chrome.storage.onChanged.addListener((changes) => {
     if (token && !hadToken) {
       // 新登录：建立 WS
       reconnectDelay = RECONNECT_INIT_MS;
-      connectWs();
+      connectWs().catch(console.error);
     } else if (!token && hadToken) {
       // 退出登录：断开 WS，清理 timer
       ws?.close();
