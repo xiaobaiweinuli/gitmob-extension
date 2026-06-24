@@ -4,10 +4,35 @@ import FloatBtn from './FloatBtn';
 
 function parseRepoPage(): { owner: string; repo: string } | null {
   const parts = location.pathname.split('/').filter(Boolean);
-  if (parts.length !== 2) return null;
-  const excluded = ['settings','marketplace','explore','notifications','login','join','orgs','sponsors'];
-  if (excluded.includes(parts[0])) return null;
-  return { owner: parts[0], repo: parts[1] };
+
+  // 至少需要 /owner/repo 两段
+  if (parts.length < 2) return null;
+
+  const owner = parts[0];
+  const repo  = parts[1];
+
+  // 排除 GitHub 顶层特殊页面（第一段不是用户/组织名）
+  const excludedFirst = [
+    'settings', 'marketplace', 'explore', 'notifications',
+    'login', 'join', 'orgs', 'sponsors', 'features', 'about',
+    'pricing', 'enterprise', 'trending', 'collections',
+    'topics', 'events', 'pulls', 'issues', 'codespaces',
+  ];
+  if (excludedFirst.includes(owner)) return null;
+
+  // 排除 /owner 下的用户个人页子路径（非仓库）
+  // 例如 github.com/user/starred、github.com/user/followers 等
+  const excludedSecond = [
+    'starred', 'followers', 'following', 'repositories',
+    'packages', 'projects', 'sponsoring', 'achievements',
+    'gists', 'overview',
+  ];
+  if (excludedSecond.includes(repo)) return null;
+
+  // repo 名称不能包含 . 开头（GitHub 不允许）或者是空字符串
+  if (!repo || repo.startsWith('.')) return null;
+
+  return { owner, repo };
 }
 
 function mount() {
